@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+
+<html lang="ja">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <title>最新ニュース一覧 - Gemini Tagging App</title>
+
+    <style>
+
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f9; }
+
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+
+        h1 { border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+
+        .news-item { border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; border-radius: 6px; background: #fff; }
+
+        .news-item h2 { margin-top: 0; font-size: 1.2em; color: #0056b3; }
+
+        .news-item p { color: #555; font-size: 0.9em; }
+
+        .tags { margin-top: 10px; }
+
+        .tag { display: inline-block; background-color: #007bff; color: white; padding: 4px 8px; margin-right: 5px; border-radius: 12px; font-size: 0.8em; }
+
+        #loading { text-align: center; font-size: 1.1em; color: #e94e77; display: none; margin-top: 20px; }
+
+    </style>
+
+</head>
+
+<body>
+
+    <div class="container">
+
+        <h1>最新ニュース一覧</h1>
+
+
+
+        <label for="category-select">カテゴリを選択:</label>
+
+        <select id="category-select" onchange="fetchNews()">
+
+            <option value="" disabled selected>カテゴリを選んでください</option>
+
+            {% for category in categories %}
+
+                <option value="{{ category }}">{{ category }}</option>
+
+            {% endfor %}
+
+        </select>
+
+
+
+        <div id="loading">📰 ニュースとGeminiによるタグを読み込み中です...（数秒かかります）</div>
+
+
+
+        <div id="news-list">
+
+            </div>
+
+    </div>
+
+
+
+    <script>
+
+        const newsListContainer = document.getElementById('news-list');
+
+        const categorySelect = document.getElementById('category-select');
+
+        const loadingIndicator = document.getElementById('loading');
+
+
+
+        // カテゴリ変更時に呼び出されるメイン関数
+
+        function fetchNews() {
+
+            const selectedCategory = categorySelect.value;
+
+            if (!selectedCategory) return;
+
+
+
+            // ローディングインジケータを表示
+
+            newsListContainer.innerHTML = '';
+
+            loadingIndicator.style.display = 'block';
+
+
+
+            // 1. カテゴリに対応するAPIエンドポイントを呼び出す (カテゴリ切替トリガー)
+
+            fetch(`/api/news/${selectedCategory}`)
+
+                .then(response => {
+
+                    if (!response.ok) {
+
+                        // Geminiクライアントが初期化されていないエラー (APIキー不足) が発生した場合、エラーメッセージを表示
+
+                        if (response.status === 500) {
+
+                            throw new Error("APIエラー: Geminiクライアントが初期化されていません。環境変数 GEMINI_API_KEY を確認してください。");
+
+                        }
+
+                        throw new Error(`HTTP error! status: ${response.status}`);
+
+                    }
+
+                    return response.json();
+
+                })
+
+                .then(data => {
+
+                    // 2. ニュース一覧の内容を動的に切り替える
+
+                    displayNews(data.news);
+
+                })
+
+                .catch(error => {
+
+                    console.error('ニュースの取得に失敗しました:', error);
+
+                    newsListContainer.innerHTML = `<p style="color: red;">${error.message}</p>`;
+
+                })
+
+                .finally(() => {
+
+                    // 3. ローディングインジケータを非表示
+
+                    loadingIndicator.style.display = 'none';
+
+                });
+
+        }
+
+
+
+        // ニュース記事をHTMLとして描画する関数
+
+        function displayNews(newsItems) {
+
+            if (newsItems.length === 0) {
+
+                newsListContainer.innerHTML = '<p>ニュース記事が見つかりませんでした。</p>';
+
+                return;
+
+            }
+
+
+
+            let htmlContent = '';
+
+            newsItems.forEach(item => {
+
+               
+
+                // 🚀 【タグクリーニングロジック】タグの前に付いている可能性のある番号「N.」や「N 」を削除する
+
+                const cleanedTags = item.tags.map(tag => {
+
+                    let cleanTag = tag.trim();
+
+                   
+
+                    // 正規表現で、タグが「数字 + ドット/スペース + 文字」で始まっているかチェックし、番号部分を削除
+
+                    const match = cleanTag.match(/^([0-9]+\.|\d+\s+)\s*(.*)/);
+
+                    if (match && match[2].length > 0) {
+
+                        cleanTag = match[2].trim();
+
+                    }
+
+                    // シンプルな "1.タグ" 形式や "1 タグ" 形式が残っていた場合の最終処理
+
+                    else if (cleanTag.match(/^[0-9]\.\s*.*/)) {
+
+                        cleanTag = cleanTag.substring(cleanTag.indexOf('.') + 1).trim();
+
+                    } else if (cleanTag.match(/^[0-9]\s+.*/)) {
+
+                        cleanTag = cleanTag.substring(cleanTag.indexOf(' ') + 1).trim();
+
+                    }
+
+
+
+                    // クリーンアップ後のタグが空や数字だけではないことを確認
+
+                    return cleanTag;
+
+                }).filter(tag => tag.length > 0 && !tag.match(/^[0-9\.\,\s]+$/));
+
+
+
+                // タグのHTMLを生成
+
+                const tagsHtml = cleanedTags.map(tag => `<span class="tag">${tag}</span>`).join('');
+
+
+
+                // ニュースアイテムのHTMLを生成
+
+                htmlContent += `
+
+                    <div class="news-item">
+
+                        <h2><a href="${item.link}" target="_blank">${item.title}</a></h2>
+
+                        <p>${item.summary.substring(0, 150)}...</p>
+
+                        <div class="tags">${tagsHtml}</div>
+
+                    </div>
+
+                `;
+
+            });
+
+           
+
+            // ニュース一覧の内容を動的に切り替える
+
+            newsListContainer.innerHTML = htmlContent;
+
+        }
+
+    </script>
+
+</body>
+
+</html>
