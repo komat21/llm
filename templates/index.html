@@ -3,165 +3,74 @@
 <head>
 <meta charset="UTF-8">
 <title>最新ニュース一覧</title>
-
 <style>
-/* ===== 全体レイアウト ===== */
-body {
-  font-family: sans-serif;
-  margin: 20px;
-  background-color: #f4f4f9;
-}
-
-.container {
-  max-width: 800px;
-  margin: auto;
-  background: white;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-}
-
-h1 {
-  border-bottom: 2px solid #333;
-  padding-bottom: 10px;
-  margin-bottom: 20px;
-}
-
-/* ===== カテゴリ ===== */
-label {
-  font-weight: bold;
-}
-
-select {
-  margin-left: 8px;
-  padding: 4px 8px;
-}
-
-/* ===== ニュース一覧 ===== */
-#news-list {
-  margin-top: 20px;
-}
-
-/* ===== ★ここが最重要：番号付きリスト完全無効化 ===== */
-ol, ul {
-  list-style: none !important;
-  padding-left: 0 !important;
-  margin-left: 0 !important;
-}
-
-li::marker {
-  content: "" !important;
-}
-
-/* ===== ニュースカード ===== */
-.news-item {
-  border: 1px solid #ddd;
-  padding: 15px;
-  margin-bottom: 15px;
-  border-radius: 6px;
-  background: #fff;
-}
-
-.news-item h2 {
-  margin: 0 0 6px 0;
-  font-size: 1.1em;
-}
-
-.news-item a {
-  color: #0056b3;
-  text-decoration: none;
-}
-
-.news-item a:hover {
-  text-decoration: underline;
-}
-
-.news-item p {
-  color: #555;
-  font-size: 0.9em;
-}
-
-/* ===== タグ ===== */
-.tags {
-  margin-top: 8px;
-}
-
-.tag {
-  display: inline-block;
-  background-color: #007bff;
-  color: #fff;
-  padding: 4px 8px;
-  margin-right: 5px;
-  border-radius: 12px;
-  font-size: 0.8em;
-}
+body { font-family: sans-serif; margin:20px; background:#f4f4f9; }
+.container { max-width:800px; margin:auto; background:#fff; padding:20px; border-radius:8px; }
+h1 { border-bottom:2px solid #333; padding-bottom:10px; }
+ol, ul { list-style:none !important; padding-left:0 !important; margin-left:0 !important; }
+li::marker { content:"" !important; }
+.news-item { border:1px solid #ddd; padding:15px; margin-bottom:15px; border-radius:6px; }
+.news-item h2 { margin:0 0 6px 0; font-size:1.1em; }
+.news-item p { color:#555; font-size:0.9em; }
+.tags { margin-top:8px; }
+.tag { display:inline-block; background:#007bff; color:#fff; padding:4px 8px; margin-right:5px; border-radius:12px; font-size:0.8em; }
 </style>
 </head>
-
 <body>
 <div class="container">
-  <h1>最新ニュース一覧</h1>
+<h1>最新ニュース一覧</h1>
 
-  <label for="category-select">カテゴリ：</label>
-  <select id="category-select" onchange="fetchNews()">
-    <option disabled selected>カテゴリを選択</option>
-    {% for category in categories %}
-      <option value="{{ category }}">{{ category }}</option>
-    {% endfor %}
-  </select>
+<label>カテゴリ：</label>
+<select id="category-select">
+  <option disabled selected>カテゴリを選択</option>
+  {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+</select>
 
-  <div id="news-list"></div>
+<div id="news-list"></div>
 </div>
 
 <script>
-const newsListContainer = document.getElementById("news-list");
-const categorySelect = document.getElementById("category-select");
+const newsList = document.getElementById("news-list");
+const select = document.getElementById("category-select");
+let isLoading = false;
 
 function fetchNews() {
-  const category = categorySelect.value;
-  if (!category) return;
+  if (isLoading) return;
+  const cat = select.value;
+  if (!cat) return;
 
-  newsListContainer.innerHTML = "<p>読み込み中…</p>";
+  isLoading = true;
+  newsList.innerHTML = "<p>読み込み中…</p>";
 
-  fetch(`/api/news/${category}`)
-    .then(res => res.json())
-    .then(data => displayNews(data.news))
-    .catch(() => {
-      newsListContainer.innerHTML = "<p>ニュース取得に失敗しました</p>";
-    });
+  fetch(`/api/news/${cat}`)
+    .then(r => r.json())
+    .then(d => render(d.news))
+    .finally(() => isLoading = false);
 }
 
-function displayNews(newsItems) {
-  if (!newsItems || newsItems.length === 0) {
-    newsListContainer.innerHTML = "<p>ニュースがありません</p>";
+function render(items) {
+  if (!items || items.length === 0) {
+    newsList.innerHTML = "<p>ニュースがありません</p>";
     return;
   }
-
   let html = "<ul>";
-
-  newsItems.forEach(item => {
+  items.forEach(it => {
     html += `
       <li>
         <div class="news-item">
-          <h2>
-            <a href="${item.link}" target="_blank" rel="noopener">
-              ${item.title}
-            </a>
-          </h2>
-          <p>${item.summary ? item.summary.substring(0, 150) + "…" : ""}</p>
+          <h2><a href="${it.link}" target="_blank" rel="noopener">${it.title}</a></h2>
+          <p>${it.summary ? it.summary.slice(0,150) + "…" : ""}</p>
           <div class="tags">
-            ${(item.tags || []).map(
-              t => `<span class="tag">${t}</span>`
-            ).join("")}
+            ${(it.tags || []).map(t => `<span class="tag">${t}</span>`).join("")}
           </div>
         </div>
-      </li>
-    `;
+      </li>`;
   });
-
   html += "</ul>";
-  newsListContainer.innerHTML = html;
+  newsList.innerHTML = html;
 }
+
+select.addEventListener("change", fetchNews);
 </script>
 </body>
 </html>

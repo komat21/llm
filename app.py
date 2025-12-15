@@ -30,28 +30,33 @@ CATEGORIES = list(CATEGORY_FEEDS_URLS.keys())
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 
 # ==============================
-# 3. キャッシュ（起動時に必ずクリア）
+# 3. タグキャッシュ
+#   ★ title → link に変更
 # ==============================
 TAGS_CACHE: dict[str, list[str]] = {}
 
 # ==============================
-# 4. ユーティリティ
+# 4. 共通ユーティリティ
 # ==============================
 def get_gemini_api_key():
     return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
+
 def clean_leading_number(text: str) -> str:
-    """
-    先頭の番号・記号を完全除去
-    例:
-    1. xxx
-    1) xxx
-    ① xxx
-    １．xxx
-    """
+    """先頭の番号・記号を除去"""
     if not text:
         return ""
     return re.sub(r"^[\d０-９①-⑳]+[\.．、)\s]+", "", text).strip()
+
+
+def is_valid_tag(tag: str) -> bool:
+    """タグとして有効か判定"""
+    if not tag:
+        return False
+    # 数字・記号だけは除外
+    if re.fullmatch(r"[\d０-９①-⑳\.\．、\(\)\s]+", tag):
+        return False
+    return True
 
 # ==============================
 # 5. RSS取得
@@ -72,30 +77,31 @@ def fetch_rss_items(feed_url: str, max_items: int = 20):
 
     items = []
     for item in channel.findall("item")[:max_items]:
-        title = clean_leading_number((item.findtext("title") or "").strip())
-        summary = clean_leading_number((item.findtext("description") or "").strip())
-        link = (item.findtext("link") or "").strip()
+        title = clean_leading_number(item.findtext("title") or "")
+        summary = clean_leading_number(item.findtext("description") or "")
+        link = item.findtext("link") or ""
 
         if title and link:
             items.append({
-                "title": title,
-                "summary": summary,
-                "link": link
+                "title": title.strip(),
+                "summary": summary.strip(),
+                "link": link.strip(),
             })
     return items
 
 # ==============================
-# 6. Gemini タグ生成（番号完全禁止）
+# 6. Gemini タグ生成
+#   ★ キャッシュキーは link
 # ==============================
-def generate_tags_for_titles(items: list[dict]) -> None:
-    uncached = [it for it in items if it["title"] not in TAGS_CACHE]
+def generate_tags_for_items(items: list[dict]) -> None:
+    uncached = [it for it in items if it["link"] not in TAGS_CACHE]
     if not uncached:
         return
 
     api_key = get_gemini_api_key()
     if not api_key:
         for it in uncached:
-            TAGS_CACHE[it["title"]] = []
+            TAGS_CACHE[it["link"]] = []
         return
 
     titles = [it["title"] for it in uncached]
@@ -106,11 +112,9 @@ def generate_tags_for_titles(items: list[dict]) -> None:
         f"models/{model}:generateContent?{urlencode({'key': api_key})}"
     )
 
-    # 🚫 番号・記号を一切使わせないプロンプト
     prompt = (
         "以下のニュースタイトルそれぞれについて、日本語タグを最大3個生成してください。\n"
-        "出力は1行ごとに「タグ1, タグ2, タグ3」の形式のみ。\n"
-        "番号、記号、箇条書き、説明文は一切含めないでください。\n\n"
+        "番号や記号は一切含めず、カンマ区切りのタグのみを出力してください。\n\n"
         + "\n".join(titles)
     )
 
@@ -127,23 +131,19 @@ def generate_tags_for_titles(items: list[dict]) -> None:
         text = data["candidates"][0]["content"]["parts"][0]["text"]
     except Exception as e:
         print("GEMINI ERROR:", e)
-        for t in titles:
-            TAGS_CACHE[t] = []
+        for it in uncached:
+            TAGS_CACHE[it["link"]] = []
         return
-
-    # デバッグ用（必要なら有効化）
-    # print("=== GEMINI RAW ===")
-    # print(text)
 
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
 
-    for title, line in zip(titles, lines):
-        tags = [
+    for item, line in zip(uncached, lines):
+        raw_tags = [
             clean_leading_number(t.strip())
             for t in line.replace("、", ",").split(",")
-            if t.strip()
         ]
-        TAGS_CACHE[title] = tags[:3]
+        tags = [t for t in raw_tags if is_valid_tag(t)]
+        TAGS_CACHE[item["link"]] = tags[:3]
 
 # ==============================
 # 7. ルーティング
@@ -152,34 +152,35 @@ def generate_tags_for_titles(items: list[dict]) -> None:
 def index():
     return render_template("index.html", categories=CATEGORIES)
 
+
 @app.route("/api/news/<category>")
 def get_news(category):
     feed_url = CATEGORY_FEEDS_URLS.get(category)
     if not feed_url:
-        return jsonify({"error": "カテゴリ不正"}), 404
+        return jsonify({"error": "invalid category"}), 404
 
     items = fetch_rss_items(feed_url)
     if not items:
-        return jsonify({"error": "ニュース取得失敗"}), 500
+        return jsonify({"error": "no news"}), 500
 
     target = items[:10]
-    generate_tags_for_titles(target)
+    generate_tags_for_items(target)
 
-    result = []
-    for it in target:
-        result.append({
-            "title": it["title"],
-            "summary": it["summary"][:150],
-            "link": it["link"],
-            "tags": TAGS_CACHE.get(it["title"], [])
-        })
-
-    return jsonify({"news": result})
+    return jsonify({
+        "news": [
+            {
+                "title": it["title"],
+                "summary": it["summary"],
+                "link": it["link"],
+                "tags": TAGS_CACHE.get(it["link"], [])
+            }
+            for it in target
+        ]
+    })
 
 # ==============================
 # 8. 起動
 # ==============================
 if __name__ == "__main__":
     TAGS_CACHE.clear()
-    print("=== TAG CACHE CLEARED ===")
     app.run(host="0.0.0.0", port=5000, debug=False)
